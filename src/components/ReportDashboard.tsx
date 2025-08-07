@@ -831,293 +831,482 @@ const ReportDashboard: React.FC = () => {
       }
     }
 
-    const newChart = new Chart(ctx, chartConfig);
-    chartJsInstances.current.set(index, newChart);
-  };
+      const newChart = new Chart(ctx, chartConfig);
+  chartJsInstances.current.set(index, newChart);
+};
+
+const handleDownloadChart = (index: number) => {
+  if (chartJsInstances.current.has(index)) {
+    const chartInstance = chartJsInstances.current.get(index);
+    if (chartInstance) {
+      const canvas = chartInstance.canvas;
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+      const link = document.createElement("a");
+      link.href = dataUrl;
+      link.download = `chart_${index + 1}_${Date.now()}.jpg`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  }
+  setShowOptionsDropdown(false);
+};
+
+const handleDownloadMap = (index: number) => {
+  const mapInstance = leafletMapRefs.current.get(index);
+  if (!mapInstance) {
+    showToast("Map not found for download.");
+    return;
+  }
+  leafletImage(mapInstance, function (err, canvas) {
+    if (err) {
+      showToast("Failed to capture map image.");
+      return;
+    }
+    const imgData = canvas.toDataURL("image/jpeg", 0.9);
+    const link = document.createElement("a");
+    link.href = imgData;
+    link.download = `map_${index + 1}_${Date.now()}.jpg`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  });
+  setShowOptionsDropdown(false);
+};
+
+  // Effects
+  useEffect(() => {
+    chartDataList.forEach((item, index) => {
+      if (item.type.startsWith("CHART_")) {
+        const rawType = item.type.replace("CHART_", "").toLowerCase();
+
+        // Handle pie charts properly
+        if (rawType === "pie" || rawType === "doughnut") {
+          const canvasId = `chart-canvas-${index}`;
+          const canvasElement = document.getElementById(canvasId) as HTMLCanvasElement | null;
+          if (canvasElement)
+            renderChartJsChart(canvasElement, item.data, rawType, index, item.timestamp);
+          return;
+        }
+
+        const chartType =
+          ["stackedbar"].includes(rawType)
+            ? "bar"
+            : ["stackedline"].includes(rawType)
+              ? "line"
+              : rawType;
+        const canvasId = `chart-canvas-${index}`;
+        const canvasElement = document.getElementById(canvasId) as HTMLCanvasElement | null;
+        if (canvasElement)
+          renderChartJsChart(canvasElement, item.data, chartType, index, item.timestamp);
+      }
+      if (item.type === "CHART_MAP") {
+        const mapContainerId = `map-container-${index}`;
+        const mapContainerElement = document.getElementById(mapContainerId);
+        if (mapContainerElement) {
+          let mapInstance = leafletMapRefs.current.get(index);
+          if (!mapInstance) {
+            mapInstance = L.map(mapContainerElement, { zoomControl: true, attributionControl: false });
+            L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+              attribution:
+                "&copy; <a href=\"https://www.openstreetmap.org/copyright\">OpenStreetMap</a> contributors",
+            }).addTo(mapInstance);
+            leafletMapRefs.current.set(index, mapInstance);
+          }
+          mapInstance.invalidateSize();
+          const latLngs = renderLeafletMarkers(mapInstance, item.data, index);
+          if (currentMapDisplayMode === "india") mapInstance.setView([20.5937, 78.9629], 5);
+          else if (latLngs.length > 0) mapInstance.fitBounds(L.latLngBounds(latLngs), { padding: [50, 50] });
+          else mapInstance.setView([0, 0], 2);
+        }
+      }
+    });
+
+    const currentIndices = new Set(chartDataList.map((_, i) => i));
+    chartJsInstances.current.forEach((chart, index) => {
+      if (!currentIndices.has(index)) {
+        chart.destroy();
+        chartJsInstances.current.delete(index);
+      }
+    });
+    leafletMapRefs.current.forEach((map, index) => {
+      if (!currentIndices.has(index)) {
+        map.remove();
+        leafletMapRefs.current.delete(index);
+        leafletMarkersRefs.current.delete(index);
+      }
+    });
+
+    return () => {
+      chartJsInstances.current.forEach((chart) => chart.destroy());
+      chartJsInstances.current.clear();
+      leafletMapRefs.current.forEach((map) => map.remove());
+      leafletMapRefs.current.clear();
+      leafletMarkersRefs.current.clear();
+    };
+  }, [chartDataList, currentMapDisplayMode]);
+
+  useEffect(() => {
+    if (chatMessagesEndRef.current)
+      chatMessagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+  }, [chartDataList]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        optionsDropdownRef.current &&
+        !optionsDropdownRef.current.contains(event.target as Node)
+      ) {
+        setShowOptionsDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
+  let lastDisplayedDate: string | null = null;
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex justify-between items-center p-4 bg-white dark:bg-gray-800 shadow-sm">
-        <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-200">
-          Report Dashboard
-        </h1>
-        <div className="flex items-center space-x-2">
-          <Button onClick={handleVoiceButtonClick} variant="ghost" className="p-2">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="lucide lucide-mic"
-            >
-              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 1 0 6 0V4a3 3 0 0 0-3-3" />
-            </svg>
-          </Button>
-          <Button onClick={handleUploadFile} variant="ghost" className="p-2">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="lucide lucide-upload"
-            >
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <path d="M17 8l-5-5-5 5" />
-              <path d="M17 19l-2 2-2-2" />
-            </svg>
-          </Button>
-          <Button onClick={handleUploadPhoto} variant="ghost" className="p-2">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="lucide lucide-image"
-            >
-              <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
-              <circle cx="8.5" cy="8.5" r="1.5" />
-              <path d="M21 15l-5-5L5 21" />
-            </svg>
-          </Button>
-          <Button onClick={handleClearChat} variant="ghost" className="p-2">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="lucide lucide-trash-2"
-            >
-              <path d="M3 6h18" />
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-              <path d="M3 6V4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2" />
-            </svg>
-          </Button>
+    <div className="relative flex flex-col min-h-screen bg-white dark:bg-gray-900 text-black dark:text-white font-inter">
+      <div className="flex-1 px-4 py-4 space-y-4 overflow-y-auto pb-28">
+        <div className="w-full max-w-5xl mx-auto space-y-4" ref={chatContainerRef}>
+          {chartDataList.map((item, index) => {
+            const currentDate = formatTimestampForDisplay(item.timestamp, "dateOnly");
+            const showDateHeader = lastDisplayedDate !== currentDate;
+            const isEmptyData =
+              item.data == null ||
+              (Array.isArray(item.data) && item.data.length === 0) ||
+              (typeof item.data === "object" && !Array.isArray(item.data) && Object.keys(item.data).length === 0);
+
+            if (item.type === "text" && isEmptyData) {
+              return (
+                <React.Fragment key={index}>
+                  {showDateHeader && (
+                    <div className="w-full flex justify-center my-3">
+                      <div className="bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs px-3 py-1 rounded-full shadow-sm whitespace-nowrap">
+                        {currentDate}
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex justify-start w-full">
+                    <div className="flex flex-col max-w-sm px-4 py-2 rounded-xl shadow text-sm flex-shrink-0 bg-gray-100 dark:bg-gray-800 text-black dark:text-white relative mr-auto">
+                      <div className="font-semibold text-xs mb-1 text-gray-700 dark:text-gray-300">
+                        Bot🤖
+                      </div>
+                      <div className="pb-4 break-words">Please ask question again.</div>
+                      <div className="absolute bottom-1 right-2 text-[10px] text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                        {formatTimestampForDisplay(item.timestamp, "fullDateTime")}
+                      </div>
+                    </div>
+                  </div>
+                </React.Fragment>
+              );
+            }
+
+            if (item.type.startsWith("CHART_") && isEmptyData) {
+              return (
+                <React.Fragment key={index}>
+                  {showDateHeader && (
+                    <div className="w-full flex justify-center my-3">
+                      <div className="bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs px-3 py-1 rounded-full shadow-sm whitespace-nowrap">
+                        {currentDate}
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex justify-start w-full">
+                    <div className="flex flex-col max-w-sm px-4 py-2 rounded-xl shadow text-sm flex-shrink-0 bg-gray-100 dark:bg-gray-800 text-black dark:text-white relative mr-auto">
+                      <div className="font-semibold text-xs mb-1 text-gray-700 dark:text-gray-300">
+                        Bot🤖
+                      </div>
+                      <div className="pb-4 break-words">No chart/map data available.</div>
+                      <div className="absolute bottom-1 right-2 text-[10px] text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                        {formatTimestampForDisplay(item.timestamp, "fullDateTime")}
+                      </div>
+                    </div>
+                  </div>
+                </React.Fragment>
+              );
+            }
+
+            if (showDateHeader) lastDisplayedDate = currentDate;
+
+            let messageContent = null;
+            let messageCardClass = "";
+            const alignment = item.type === "user" ? "justify-end" : "justify-start";
+            const formattedTime = formatTimestampForDisplay(item.timestamp, "timeOnly");
+
+            if (item.type === "user") {
+              messageCardClass =
+                "flex flex-col max-w-sm px-4 py-2 rounded-xl shadow text-sm flex-shrink-0 bg-gray-100 dark:bg-gray-800 relative";
+              messageContent = (
+                <>
+                  <div className="font-semibold text-xs mb-1 text-black dark:text-white">You</div>
+                  <div className="text-black dark:text-white pb-4 break-words">{String(item.data)}</div>
+                  <div className="absolute bottom-1 right-2 text-[10px] text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                    {formattedTime}
+                  </div>
+                </>
+              );
+            } else if (item.type === "text") {
+              messageCardClass =
+                "flex flex-col max-w-sm px-4 py-2 rounded-xl shadow text-sm flex-shrink-0 bg-gray-100 dark:bg-gray-800 text-black dark:text-white relative mr-auto";
+              messageContent = (
+                <>
+                  <div className="font-semibold text-xs mb-1 text-gray-700 dark:text-gray-300">
+                    Bot🤖
+                  </div>
+                  <div className="pb-4 break-words">
+                    <pre className="whitespace-pre-wrap">{String(item.data)}</pre>
+                  </div>
+                  <div className="absolute bottom-1 right-2 text-[10px] text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                    {formattedTime}
+                  </div>
+                </>
+              );
+            } else if (item.type === "error") {
+              messageCardClass =
+                "flex flex-col max-w-sm px-4 py-2 rounded-xl shadow text-sm flex-shrink-0 bg-red-100 text-red-700 relative mr-auto";
+              messageContent = (
+                <>
+                  <div className="pb-4 break-words">{String(item.data)}</div>
+                  <div className="absolute bottom-1 right-2 text-[10px] text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                    {formattedTime}
+                  </div>
+                </>
+              );
+            } else if (item.type === "CHART_MAP") {
+              messageCardClass =
+                "relative w-full h-[calc(100vh-250px)] min-h-[400px] bg-white dark:bg-gray-700 rounded-xl shadow p-2 flex flex-col";
+              messageContent = (
+                <>
+                  <div
+                    id={`map-container-${index}`}
+                    style={{ width: "100%", height: "100%" }}
+                    className="overflow-hidden rounded-lg"
+                  />
+                  <div className="map-overlay-controls">
+                    <Button
+                      onClick={() => handleToggleMapMode(index, item.data)}
+                      className="bg-blue-600 text-white hover:bg-blue-700 rounded-full p-2 text-xs flex items-center gap-1 shadow-md"
+                      title={
+                        currentMapDisplayMode === "world"
+                          ? "Zoom In to India"
+                          : "Zoom Out to World"
+                      }
+                    >
+                      {currentMapDisplayMode === "world" ? (
+                        <MapPin className="w-3 h-3" />
+                      ) : (
+                        <Globe className="w-3 h-3" />
+                      )}
+                      {currentMapDisplayMode === "world"
+                        ? "Zoom In to India"
+                        : "Zoom Out to World"}
+                    </Button>
+                    <Button
+                      onClick={() => handleDownloadMap(index)}
+                      className="bg-white bg-opacity-90 hover:bg-opacity-100 text-gray-700 dark:text-gray-300 dark:bg-gray-800 rounded-full p-1 shadow-md"
+                      title={`Download Map ${index + 1}`}
+                      aria-label={`Download Map ${index + 1}`}
+                    >
+                      <Download className="w-5 h-5" />
+                    </Button>
+                    <Button
+                      onClick={() => handleShareMap(index)}
+                      className="bg-white bg-opacity-90 hover:bg-opacity-100 text-gray-700 dark:text-gray-300 dark:bg-gray-800 rounded-full p-1 shadow-md"
+                      title={`Share Map ${index + 1}`}
+                      aria-label={`Share Map ${index + 1}`}
+                    >
+                      <Share2 className="w-5 h-5" />
+                    </Button>
+                  </div>
+                  <div className="absolute bottom-1 right-2 text-[10px] text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                    {formatTimestampForDisplay(item.timestamp, "fullDateTime")}
+                  </div>
+                  <style>{`
+                    #map-container-${index} {
+                      position: relative;
+                      padding-top: 40px;
+                      height: 100%;
+                      width: 100%;
+                    }
+                    .map-overlay-controls {
+                      position: absolute;
+                      top: 8px;
+                      right: 8px;
+                      z-index: 1200;
+                      display: flex;
+                      gap: 8px;
+                    }
+                    .leaflet-control {
+                      z-index: 1100 !important;
+                    }
+                  `}</style>
+                </>
+              );
+            } else if (item.type.startsWith("CHART_")) {
+              const rawType = item.type.replace("CHART_", "").toLowerCase();
+
+              // Handle all chart types with the same container structure
+              return (
+                <React.Fragment key={index}>
+                  {showDateHeader && (
+                    <div className="w-full flex justify-center my-3">
+                      <div className="bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs px-3 py-1 rounded-full shadow-sm whitespace-nowrap">
+                        {currentDate}
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex justify-start w-full">
+                    <ChartContainer dataLength={item.data.length} className="relative">
+                      <canvas
+                        id={`chart-canvas-${index}`}
+                        className="h-full w-full"
+                        style={{ height: "500px" }}
+                      />
+                      <Button
+                        variant="ghost"
+                        onClick={() => handleDownloadChart(index)}
+                        className="absolute top-2 right-2 bg-white bg-opacity-90 hover:bg-opacity-100 text-gray-700 dark:text-gray-300 dark:bg-gray-800 rounded-full p-1 shadow-md"
+                        title={`Download Chart ${index + 1}`}
+                        aria-label={`Download Chart ${index + 1}`}
+                      >
+                        <Download className="w-5 h-5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        onClick={() => handleShareChart(index)}
+                        className="absolute top-2 right-12 bg-white bg-opacity-90 hover:bg-opacity-100 text-gray-700 dark:text-gray-300 dark:bg-gray-800 rounded-full p-1 shadow-md"
+                        title={`Share Chart ${index + 1}`}
+                        aria-label={`Share Chart ${index + 1}`}
+                      >
+                        <Share2 className="w-5 h-5" />
+                      </Button>
+                      <div className="absolute bottom-1 right-2 text-[10px] text-gray-500 dark:text-gray-400 whitespace-nowrap z-10">
+                        {formatTimestampForDisplay(item.timestamp, "fullDateTime")}
+                      </div>
+                    </ChartContainer>
+                  </div>
+                </React.Fragment>
+              );
+            }
+
+            return (
+              <React.Fragment key={index}>
+                {showDateHeader && (
+                  <div className="w-full flex justify-center my-3">
+                    <div className="bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs px-3 py-1 rounded-full shadow-sm whitespace-nowrap">
+                      {currentDate}
+                    </div>
+                  </div>
+                )}
+                <div className={`flex ${alignment} w-full`}>
+                  <div className={messageCardClass}>{messageContent}</div>
+                </div>
+              </React.Fragment>
+            );
+          })}
+          <div ref={chatMessagesEndRef} />
         </div>
       </div>
 
-      <div className="flex-1 p-4 overflow-y-auto">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
-          <ChartContainer dataLength={chartDataList.length}>
-            <div className="flex justify-between items-center mb-2">
-              <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200">
-                Chat History
-              </h3>
-              <Button onClick={() => setShowOptionsDropdown(!showOptionsDropdown)} variant="ghost" className="p-2">
-                <MoreVertical className="h-5 w-5 text-gray-600 dark:text-gray-400" />
-              </Button>
-            </div>
-            {showOptionsDropdown && (
-              <div ref={optionsDropdownRef} className="absolute top-full mt-2 w-48 bg-white dark:bg-gray-700 rounded-md shadow-lg z-10">
-                <button onClick={handleClearChat} className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 rounded-t-md">
-                  Clear Chat
-                </button>
-                <button onClick={() => {
-                  const pdf = new jsPDF();
-                  const chatContent = document.getElementById("chat-content");
-                  if (chatContent) {
-                    html2canvas(chatContent, { scale: 2 }).then(canvas => {
-                      const imgData = canvas.toDataURL('image/png');
-                      pdf.addImage(imgData, 'PNG', 0, 0, 210, 297); // A4 size
-                      pdf.save('chat_history.pdf');
-                    });
-                  }
-                }} className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 rounded-b-md">
-                  Download Chat
-                </button>
-              </div>
-            )}
-            <div id="chat-content" className="flex flex-col-reverse overflow-y-auto pr-2">
-              {chartDataList.map((item, index) => (
-                <div key={index} className="flex justify-end mb-2">
-                  <div className="bg-blue-600 text-white p-2 rounded-lg max-w-[80%]">
-                    <p className="text-sm">{item.data}</p>
-                    <p className="text-xs text-gray-300">{formatTimestampForDisplay(item.timestamp, "timeOnly")}</p>
-                  </div>
-                </div>
-              ))}
-              {loading && (
-                <div className="flex justify-end mb-2">
-                  <div className="bg-gray-200 text-gray-800 p-2 rounded-lg max-w-[80%]">
-                    <p className="text-sm">Thinking...</p>
-                  </div>
-                </div>
-              )}
-            </div>
-            <div className="flex justify-end mt-2">
-              <input
-                type="text"
-                placeholder="Type your message..."
-                value={userInput}
-                onChange={(e) => setUserInput(e.target.value)}
-                onKeyPress={(e) => {
-                  if (e.key === "Enter") {
-                    handleSend();
-                  }
-                }}
-                onFocus={() => setInputFocused(true)}
-                onBlur={() => setInputFocused(false)}
-                className="flex-1 p-2 rounded-full bg-gray-100 dark:bg-gray-600 text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
-              />
-              <Button onClick={() => handleSend()} variant="ghost" className="p-2">
-                <SendHorizonal className="h-5 w-5 text-gray-600 dark:text-gray-400" />
-              </Button>
-            </div>
-          </ChartContainer>
+      <div className="fixed bottom-0 right-0 left-[224px] bg-white dark:bg-gray-900 py-3 px-4 z-20 shadow-lg">
+        <div
+          className={`mx-auto max-w-5xl flex items-center rounded-full bg-gray-100 dark:bg-gray-800 px-3 py-2 shadow-md transition-colors border ${inputFocused ? "border-blue-600" : "border-transparent"
+            }`}
+          style={{ gap: "8px" }}
+          onClick={() => setInputFocused(true)}
+          onBlur={() => setInputFocused(false)}
+          tabIndex={-1}
+        >
+          <button
+            onClick={handleVoiceButtonClick}
+            aria-pressed={listening}
+            aria-label={listening ? "Stop Voice Input" : "Start Voice Input"}
+            className={`relative rounded-full w-11 h-11 flex items-center justify-center transition-colors focus:outline-none focus:ring-4 focus:ring-blue-500 ${listening ? "bg-blue-700 text-white ring-4 ring-blue-300 animate-pulse" : "bg-blue-600 text-white hover:bg-blue-700"
+              }`}
+          >
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              xmlns="http://www.w3.org/2000/svg"
+              className="w-7 h-7"
+            >
+              <path d="M12 14C13.654 14 15 12.654 15 11V5C15 3.346 13.654 2 12 2C10.346 2 9 3.346 9 5V11C9 12.654 10.346 14 12 14Z" />
+              <path d="M19 11C19 14.3137 16.3137 17 13 17H11C7.68629 17 5 14.3137 5 11H7C7 13.2091 8.79086 15 11 15H13C15.2091 15 17 13.2091 17 11H19Z" />
+              <rect x="11" y="18" width="2" height="4" rx="1" />
+            </svg>
+          </button>
 
-          <ChartContainer dataLength={chartDataList.length}>
-            <div className="flex justify-between items-center mb-2">
-              <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200">
-                Charts
-              </h3>
-              <Button onClick={() => setShowOptionsDropdown(!showOptionsDropdown)} variant="ghost" className="p-2">
-                <MoreVertical className="h-5 w-5 text-gray-600 dark:text-gray-400" />
-              </Button>
-            </div>
+          <input
+            type="text"
+            className="flex-1 bg-transparent border-none outline-none text-base px-4 py-3 text-black dark:text-white placeholder-gray-500 dark:placeholder-gray-400"
+            placeholder="What would you analyze?"
+            value={userInput}
+            onChange={(e) => setUserInput(e.target.value)}
+            onFocus={() => setInputFocused(true)}
+            onBlur={() => setInputFocused(false)}
+            onKeyDown={(e) => e.key === "Enter" && handleSend()}
+            aria-label="Ask a report question"
+          />
+
+          <div className="relative" ref={optionsDropdownRef}>
+            <Button
+              variant="ghost"
+              onClick={() => setShowOptionsDropdown(!showOptionsDropdown)}
+              className="p-3 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition-colors"
+              title="More options"
+              aria-haspopup="true"
+              aria-expanded={showOptionsDropdown}
+            >
+              <MoreVertical className="w-6 h-6" />
+            </Button>
             {showOptionsDropdown && (
-              <div ref={optionsDropdownRef} className="absolute top-full mt-2 w-48 bg-white dark:bg-gray-700 rounded-md shadow-lg z-10">
-                <button onClick={() => handleClearChat()} className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 rounded-t-md">
-                  Clear Charts
+              <div
+                style={{ position: "absolute", right: 0, bottom: "100%", marginBottom: "0.5rem", zIndex: 40, width: "11rem" }}
+                className="bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 animate-fade-in-up"
+              >
+                <button
+                  onClick={handleUploadFile}
+                  className="flex items-center gap-2 w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 whitespace-nowrap"
+                >
+                  <Paperclip className="w-4 h-4" /> Upload File
                 </button>
-                <button onClick={() => {
-                  const pdf = new jsPDF();
-                  const chartContent = document.getElementById("chart-content");
-                  if (chartContent) {
-                    html2canvas(chartContent, { scale: 2 }).then(canvas => {
-                      const imgData = canvas.toDataURL('image/png');
-                      pdf.addImage(imgData, 'PNG', 0, 0, 210, 297); // A4 size
-                      pdf.save('charts.pdf');
-                    });
-                  }
-                }} className="w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 rounded-b-md">
-                  Download Charts
+                <button
+                  onClick={handleUploadPhoto}
+                  className="flex items-center gap-2 w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 whitespace-nowrap"
+                >
+                  <ImageIcon className="w-4 h-4" /> Upload Photo
+                </button>
+                <button
+                  onClick={handleClearChat}
+                  className="flex items-center gap-2 w-full px-4 py-2 text-sm text-red-600 hover:bg-red-100 dark:hover:bg-red-700 dark:text-red-400 whitespace-nowrap"
+                >
+                  <Trash2 className="w-4 h-4" /> Clear Chat History
                 </button>
               </div>
             )}
-            <div id="chart-content" className="overflow-y-auto pr-2">
-              {chartDataList.map((item, index) => (
-                <div key={index} className="mb-4">
-                  <div className="flex justify-between items-center mb-2">
-                    <h4 className="text-md font-medium text-gray-800 dark:text-gray-200">
-                      {item.type.replace("CHART_", "")}
-                    </h4>
-                    <div className="flex space-x-1">
-                      <Button onClick={() => handleShareChart(index)} variant="ghost" className="p-1">
-                        <Share2 className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-                      </Button>
-                      <Button onClick={() => handleShareMap(index)} variant="ghost" className="p-1">
-                        <Globe className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-                      </Button>
-                      <Button onClick={() => handleClearChart()} variant="ghost" className="p-1">
-                        <Trash2 className="h-4 w-4 text-gray-600 dark:text-gray-400" />
-                      </Button>
-                    </div>
-                  </div>
-                  {item.type === "CHART_MAP" ? (
-                    <div className="w-full h-full">
-                      <L.Map
-                        ref={(el) => {
-                          if (el) {
-                            leafletMapRefs.current.set(index, L.map(el, {
-                              center: [20.5937, 78.9629], // Default to India
-                              zoom: 5,
-                              zoomControl: false,
-                              attributionControl: false,
-                              minZoom: 2,
-                              maxZoom: 18,
-                            }));
-                            const map = leafletMapRefs.current.get(index);
-                            if (map) {
-                              map.on("moveend", () => {
-                                if (currentMapDisplayMode === "india") {
-                                  map.setView([20.5937, 78.9629], 5);
-                                } else {
-                                  const latLngs = renderLeafletMarkers(map, item.data, index);
-                                  if (latLngs.length > 0) {
-                                    map.fitBounds(L.latLngBounds(latLngs), { padding: [50, 50] });
-                                  } else {
-                                    map.setView([0, 0], 2);
-                                  }
-                                }
-                              });
-                              map.on("zoomend", () => {
-                                if (currentMapDisplayMode === "india") {
-                                  map.setView([20.5937, 78.9629], 5);
-                                } else {
-                                  const latLngs = renderLeafletMarkers(map, item.data, index);
-                                  if (latLngs.length > 0) {
-                                    map.fitBounds(L.latLngBounds(latLngs), { padding: [50, 50] });
-                                  } else {
-                                    map.setView([0, 0], 2);
-                                  }
-                                }
-                              });
-                              map.on("resize", () => {
-                                if (currentMapDisplayMode === "india") {
-                                  map.setView([20.5937, 78.9629], 5);
-                                } else {
-                                  const latLngs = renderLeafletMarkers(map, item.data, index);
-                                  if (latLngs.length > 0) {
-                                    map.fitBounds(L.latLngBounds(latLngs), { padding: [50, 50] });
-                                  } else {
-                                    map.setView([0, 0], 2);
-                                  }
-                                }
-                              });
-                              map.on("load", () => {
-                                if (currentMapDisplayMode === "india") {
-                                  map.setView([20.5937, 78.9629], 5);
-                                } else {
-                                  const latLngs = renderLeafletMarkers(map, item.data, index);
-                                  if (latLngs.length > 0) {
-                                    map.fitBounds(L.latLngBounds(latLngs), { padding: [50, 50] });
-                                  } else {
-                                    map.setView([0, 0], 2);
-                                  }
-                                }
-                              });
-                            }
-                          }
-                        }}
-                        className="w-full h-full"
-                      />
-                    </div>
-                  ) : (
-                    <div className="w-full h-full">
-                      <canvas
-                        ref={(el) => {
-                          if (el) {
-                            renderChartJsChart(el, item.data, item.type.replace("CHART_", ""), index, item.timestamp);
-                          }
-                        }}
-                        className="w-full h-full"
-                      />
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </ChartContainer>
+          </div>
+
+          <Button
+            onClick={() => handleSend()}
+            className="rounded-full p-3 bg-blue-600 text-white hover:bg-blue-700 shadow-md"
+            disabled={loading || !userInput.trim()}
+            title="Send question"
+            aria-label="Send question"
+          >
+            <SendHorizonal className="w-5 h-5" />
+          </Button>
         </div>
+        {loading && (
+          <div className="absolute -top-6 left-0 right-0 text-sm text-blue-600 animate-pulse text-center">
+            Loading...
+          </div>
+        )}
       </div>
     </div>
   );

@@ -157,16 +157,18 @@ const Button: React.FC<ButtonProps> = ({
   );
 };
 
-const ChartContainer: React.FC<{ children: React.ReactNode; dataLength: number; className?: string }> = ({
+const ChartContainer: React.FC<{ children: React.ReactNode; dataLength: number; className?: string; height?: string }> = ({
   children,
   dataLength,
   className = "",
+  height = "500px"
 }) => {
   const itemWidth = 80;
   const minWidth = dataLength * itemWidth;
   return (
     <div
-      className={`overflow-x-auto w-full h-[500px] bg-white dark:bg-gray-700 rounded-lg border p-2 flex flex-col relative ${className}`}
+      className={`overflow-x-auto w-full bg-white dark:bg-gray-700 rounded-lg border p-2 flex flex-col relative ${className}`}
+      style={{ height }}
     >
       <div style={{ minWidth, height: "100%" }} className="flex-grow relative">
         {children}
@@ -639,7 +641,7 @@ const ReportDashboard: React.FC = () => {
         interaction: { mode: "nearest", intersect: false },
         plugins: {
           legend: { 
-            position: chartType === "pie" || chartType === "doughnut" ? "right" : "bottom", 
+            position: "bottom", 
             display: true,
             labels: {
               boxWidth: 12,
@@ -714,19 +716,27 @@ const ReportDashboard: React.FC = () => {
         }],
       };
       
-      // Enhanced options for pie charts
+      // Enhanced options for pie charts with external labels
       chartConfig.options = {
         ...chartConfig.options,
+        layout: {
+          padding: {
+            top: 40,
+            bottom: 40,
+            left: 40,
+            right: 40
+          }
+        },
         plugins: {
           ...chartConfig.options.plugins,
           legend: {
-            position: "right",
+            position: "bottom",
             display: true,
             labels: {
-              boxWidth: 12,
-              padding: 10,
+              boxWidth: 15,
+              padding: 15,
               font: {
-                size: 10
+                size: 12
               },
               generateLabels: (chart) => {
                 const data = chart.data;
@@ -748,6 +758,36 @@ const ReportDashboard: React.FC = () => {
                 }
                 return [];
               }
+            }
+          },
+          datalabels: {
+            display: true,
+            backgroundColor: 'rgba(255, 255, 255, 0.9)',
+            borderColor: function(context) {
+              return context.dataset.backgroundColor[context.dataIndex];
+            },
+            borderRadius: 4,
+            borderWidth: 1,
+            color: '#333',
+            font: {
+              size: 11,
+              weight: 'bold'
+            },
+            padding: 6,
+            formatter: function(value, context) {
+              const total = context.dataset.data.reduce((a: number, b: number) => a + b, 0);
+              const percent = ((value / total) * 100).toFixed(1);
+              const label = context.chart.data.labels[context.dataIndex];
+              return `${label}\n${value} (${percent}%)`;
+            },
+            anchor: 'end',
+            align: 'end',
+            offset: 10,
+            clip: false,
+            display: function(context) {
+              const total = context.dataset.data.reduce((a: number, b: number) => a + b, 0);
+              const percent = (context.parsed / total) * 100;
+              return percent > 3; // Only show labels for slices > 3%
             }
           }
         }
@@ -1160,11 +1200,14 @@ const handleDownloadMap = (index: number) => {
                     </div>
                   )}
                   <div className="flex justify-start w-full">
-                    <ChartContainer dataLength={item.data.length} className="relative">
+                    <ChartContainer 
+                      dataLength={item.data.length} 
+                      className="relative"
+                      height={rawType === "pie" || rawType === "doughnut" ? "650px" : "500px"}
+                    >
                       <canvas
                         id={`chart-canvas-${index}`}
                         className="h-full w-full"
-                        style={{ height: "500px" }}
                       />
                       <Button
                         variant="ghost"

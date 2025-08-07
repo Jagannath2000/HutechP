@@ -760,36 +760,31 @@ const ReportDashboard: React.FC = () => {
               }
             }
           },
-          datalabels: {
-            display: true,
-            backgroundColor: 'rgba(255, 255, 255, 0.9)',
-            borderColor: function(context) {
-              return context.dataset.backgroundColor[context.dataIndex];
-            },
-            borderRadius: 4,
-            borderWidth: 1,
-            color: '#333',
-            font: {
-              size: 11,
-              weight: 'bold'
-            },
-            padding: 6,
-            formatter: function(value, context) {
-              const total = context.dataset.data.reduce((a: number, b: number) => a + b, 0);
-              const percent = ((value / total) * 100).toFixed(1);
-              const label = context.chart.data.labels[context.dataIndex];
-              return `${label}\n${value} (${percent}%)`;
-            },
-            anchor: 'end',
-            align: 'end',
-            offset: 10,
-            clip: false,
-            display: function(context) {
-              const total = context.dataset.data.reduce((a: number, b: number) => a + b, 0);
-              const percent = (context.parsed / total) * 100;
-              return percent > 3; // Only show labels for slices > 3%
+                      datalabels: {
+              display: true,
+              backgroundColor: 'rgba(255, 255, 255, 0.9)',
+              borderColor: function(context) {
+                return context.dataset.backgroundColor[context.dataIndex];
+              },
+              borderRadius: 4,
+              borderWidth: 1,
+              color: '#333',
+              font: {
+                size: 11,
+                weight: 'bold'
+              },
+              padding: 6,
+              formatter: function(value, context) {
+                const total = context.dataset.data.reduce((a: number, b: number) => a + b, 0);
+                const percent = ((value / total) * 100).toFixed(1);
+                const label = context.chart.data.labels[context.dataIndex];
+                return `${label}\n${value} (${percent}%)`;
+              },
+              anchor: 'end',
+              align: 'end',
+              offset: 10,
+              clip: false
             }
-          }
         }
       };
     } else {

@@ -713,10 +713,27 @@ const ReportDashboard: React.FC = () => {
           backgroundColor: colorPalette,
           borderColor: borderPalette.map(color => color + "CC"),
           borderWidth: 2,
+          // Enable leader lines for external labels
+          datalabels: {
+            anchor: 'end',
+            align: 'end',
+            offset: 15,
+            backgroundColor: 'rgba(255, 255, 255, 0.95)',
+            borderColor: '#e0e0e0',
+            borderRadius: 4,
+            borderWidth: 1,
+            color: '#333',
+            font: {
+              size: 11,
+              weight: 'bold'
+            },
+            padding: 6,
+            clip: false
+          }
         }],
       };
       
-      // Enhanced options for pie charts with external labels
+            // Enhanced options for pie charts with external labels
       chartConfig.options = {
         ...chartConfig.options,
         layout: {
@@ -725,6 +742,16 @@ const ReportDashboard: React.FC = () => {
             bottom: 40,
             left: 40,
             right: 40
+          }
+        },
+        elements: {
+          arc: {
+            borderWidth: 2,
+            hoverBorderWidth: 3
+          },
+          line: {
+            borderWidth: 2,
+            tension: 0
           }
         },
         plugins: {
@@ -760,31 +787,75 @@ const ReportDashboard: React.FC = () => {
               }
             }
           },
-                      datalabels: {
-              display: true,
-              backgroundColor: 'rgba(255, 255, 255, 0.9)',
-              borderColor: function(context) {
-                return context.dataset.backgroundColor[context.dataIndex];
-              },
-              borderRadius: 4,
-              borderWidth: 1,
-              color: '#333',
-              font: {
-                size: 11,
-                weight: 'bold'
-              },
-              padding: 6,
-              formatter: function(value, context) {
-                const total = context.dataset.data.reduce((a: number, b: number) => a + b, 0);
-                const percent = ((value / total) * 100).toFixed(1);
-                const label = context.chart.data.labels[context.dataIndex];
-                return `${label}\n${value} (${percent}%)`;
-              },
-              anchor: 'end',
-              align: 'end',
-              offset: 10,
-              clip: false
+          datalabels: {
+            display: true,
+            backgroundColor: 'rgba(255, 255, 255, 0.95)',
+            borderColor: '#e0e0e0',
+            borderRadius: 4,
+            borderWidth: 1,
+            color: '#333',
+            font: {
+              size: 11,
+              weight: 'bold'
+            },
+            padding: 6,
+            formatter: function(value, context) {
+              const total = context.dataset.data.reduce((a: number, b: number) => a + b, 0);
+              const percent = ((value / total) * 100).toFixed(1);
+              const label = context.chart.data.labels[context.dataIndex];
+              return `${label}\n${value} (${percent}%)`;
+            },
+            anchor: 'end',
+            align: 'end',
+            offset: 15,
+            clip: false,
+            // Configure leader lines with slice colors
+            textStrokeColor: function(context) {
+              return context.dataset.backgroundColor[context.dataIndex];
+            },
+            textStrokeWidth: 0,
+            // Leader line configuration
+            listeners: {
+              afterDraw: function(chart, args, options) {
+                const ctx = chart.ctx;
+                const dataset = chart.data.datasets[0];
+                const meta = chart.getDatasetMeta(0);
+                
+                ctx.save();
+                
+                meta.data.forEach((arc, index) => {
+                  const color = dataset.backgroundColor[index];
+                  const model = arc;
+                  const startAngle = model.startAngle;
+                  const endAngle = model.endAngle;
+                  const midAngle = startAngle + (endAngle - startAngle) / 2;
+                  
+                  const x = model.x;
+                  const y = model.y;
+                  const outerRadius = model.outerRadius;
+                  const innerRadius = model.innerRadius;
+                  
+                  // Calculate line start point (edge of slice)
+                  const lineStartX = x + Math.cos(midAngle) * outerRadius;
+                  const lineStartY = y + Math.sin(midAngle) * outerRadius;
+                  
+                  // Calculate line end point (further out for label)
+                  const lineEndX = x + Math.cos(midAngle) * (outerRadius + 20);
+                  const lineEndY = y + Math.sin(midAngle) * (outerRadius + 20);
+                  
+                  // Draw the connecting line with slice color
+                  ctx.beginPath();
+                  ctx.strokeStyle = color;
+                  ctx.lineWidth = 2;
+                  ctx.moveTo(lineStartX, lineStartY);
+                  ctx.lineTo(lineEndX, lineEndY);
+                  ctx.stroke();
+                });
+                
+                ctx.restore();
+              }
             }
+          }
         }
       };
     } else {

@@ -125,46 +125,7 @@ const ChartContainer: React.FC<{ children: React.ReactNode; dataLength: number; 
   );
 };
 
-// Pie Chart Legend Component
-const PieChartLegend: React.FC<{ data: any[]; timestamp: string }> = ({ data, timestamp }) => {
-  const colorPalette = [
-    "#3b82f6", "#f97316", "#14b8a6", "#ef4444", "#8b5cf6", "#eab308", "#6b7280",
-  ];
-  
-  const total = data.reduce((sum, item) => sum + (item.value || 0), 0);
-  
-  return (
-    <div className="w-full bg-white dark:bg-gray-700 rounded-lg border p-4 mt-4">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold text-gray-800 dark:text-white">Chart Legend</h3>
-        <span className="text-sm text-gray-500 dark:text-gray-400">
-          {new Date(timestamp).toLocaleDateString()}
-        </span>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {data.map((item, index) => {
-          const percentage = total > 0 ? ((item.value / total) * 100).toFixed(1) : "0";
-          return (
-            <div key={index} className="flex items-center space-x-3 p-2 rounded-lg bg-gray-50 dark:bg-gray-600">
-              <div 
-                className="w-4 h-4 rounded-full flex-shrink-0"
-                style={{ backgroundColor: colorPalette[index % colorPalette.length] }}
-              />
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                  {item.label || item.name}
-                </div>
-                <div className="text-xs text-gray-500 dark:text-gray-400">
-                  {item.value} ({percentage}%)
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
+
 
 type ChartDataItem =
   | { type: "user" | "text" | "error"; data: string; timestamp: string }
@@ -215,7 +176,7 @@ const ReportDashboard: React.FC = () => {
     return "Good night";
   };
 
-  // Handler for voice button - IMPROVED
+  // Handler for voice button - FIXED to avoid bot voice interference
   const handleVoiceButtonClick = async () => {
     if (!browserSupportsSpeechRecognition) {
       showToast("Speech recognition not supported in this browser");
@@ -233,17 +194,23 @@ const ReportDashboard: React.FC = () => {
       resetTranscript();
       setUserInput("");
       
+      // STOP listening before speaking to avoid interference
+      SpeechRecognition.stopListening();
+      
       const greeting = `${getGreeting()}. Hello! I am your AI health assistant. How can I help you today?`;
       await playElevenLabsTTS(greeting);
       
-      // Start listening with better configuration
+      // Wait a bit after TTS finishes before starting to listen
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Start listening with better configuration AFTER TTS is done
       await SpeechRecognition.startListening({ 
         continuous: true,
         language: 'en-US'
       });
       
       setAwaitingMoreQuestion(true);
-      showToast("Listening... Speak now!");
+      showToast("🎤 I'm listening... Please speak now!");
       
     } catch (error) {
       console.error("Voice recognition error:", error);
@@ -417,6 +384,10 @@ const ReportDashboard: React.FC = () => {
 
   const fetchReportData = async (question: string, retryCount = 0) => {
     setLoading(true);
+    
+    // STOP listening during API call and TTS to avoid interference
+    SpeechRecognition.stopListening();
+    
     try {
       const response = await fetch("http://localhost:8090/api/chart", {
         method: "POST",
@@ -447,6 +418,12 @@ const ReportDashboard: React.FC = () => {
           timestamp: replyTimestamp,
         });
         await playElevenLabsTTS("Please ask question again.");
+        
+        // Resume listening after TTS
+        await new Promise(resolve => setTimeout(resolve, 500));
+        if (awaitingMoreQuestion) {
+          SpeechRecognition.startListening({ continuous: true, language: 'en-US' });
+        }
         return;
       }
 
@@ -472,6 +449,10 @@ const ReportDashboard: React.FC = () => {
           await playElevenLabsTTS(displayData);
           setAwaitingMoreQuestion(true);
           await playElevenLabsTTS("Do you have any other questions?");
+          
+          // Resume listening after TTS
+          await new Promise(resolve => setTimeout(resolve, 500));
+          SpeechRecognition.startListening({ continuous: true, language: 'en-US' });
         }
       } else if (result.type.startsWith("CHART")) {
         if (result.type === "CHART_MAP") setCurrentMapDisplayMode("india");
@@ -484,6 +465,10 @@ const ReportDashboard: React.FC = () => {
         });
         setAwaitingMoreQuestion(true);
         await playElevenLabsTTS("Here is your chart. Do you have any other questions?");
+        
+        // Resume listening after TTS
+        await new Promise(resolve => setTimeout(resolve, 500));
+        SpeechRecognition.startListening({ continuous: true, language: 'en-US' });
       }
     } catch (err) {
       setLoading(false);
@@ -493,6 +478,12 @@ const ReportDashboard: React.FC = () => {
         timestamp: new Date().toISOString(),
       });
       await playElevenLabsTTS("Server busy or network error. Please try again.");
+      
+      // Resume listening after error TTS
+      await new Promise(resolve => setTimeout(resolve, 500));
+      if (awaitingMoreQuestion) {
+        SpeechRecognition.startListening({ continuous: true, language: 'en-US' });
+      }
     }
   };
 
@@ -615,12 +606,58 @@ const ReportDashboard: React.FC = () => {
       },
     };
 
-    // Special handling for pie and doughnut charts - NO LABELS ON CHART
+    // Special handling for pie and doughnut charts with smart legend positioning
     if (chartType === "pie" || chartType === "doughnut") {
+      const dataLength = data.length;
+      const isLargeDataset = dataLength > 8;
+      
       chartConfig.options.plugins = {
         ...chartConfig.options.plugins,
-        legend: { display: false }, // Hide legend on chart
-        datalabels: { display: false }, // Hide data labels on chart
+        legend: { 
+          display: true,
+          position: isLargeDataset ? 'right' : 'bottom',
+          labels: {
+            usePointStyle: true,
+            padding: isLargeDataset ? 10 : 15,
+            font: {
+              size: isLargeDataset ? 10 : 12
+            },
+            generateLabels: function(chart) {
+              const data = chart.data;
+              if (data.labels.length && data.datasets.length) {
+                const dataset = data.datasets[0];
+                const total = dataset.data.reduce((a: number, b: number) => a + b, 0);
+                return data.labels.map((label, i) => {
+                  const value = dataset.data[i];
+                  const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : "0";
+                  return {
+                    text: `${label}: ${value} (${percentage}%)`,
+                    fillStyle: dataset.backgroundColor[i],
+                    strokeStyle: dataset.borderColor[i],
+                    lineWidth: dataset.borderWidth,
+                    pointStyle: 'circle',
+                    hidden: false,
+                    index: i
+                  };
+                });
+              }
+              return [];
+            }
+          }
+        },
+        datalabels: { 
+          display: !isLargeDataset, // Only show data labels for smaller datasets
+          color: '#fff',
+          font: {
+            weight: 'bold',
+            size: isLargeDataset ? 10 : 12
+          },
+          formatter: (value: number, ctx: any) => {
+            const total = ctx.dataset.data.reduce((a: number, b: number) => a + b, 0);
+            const percent = ((value / total) * 100).toFixed(1);
+            return isLargeDataset ? `${percent}%` : `${value}\n(${percent}%)`;
+          }
+        }
       };
       chartConfig.options!.scales!.x!.display = false;
       chartConfig.options!.scales!.y!.display = false;
@@ -1162,7 +1199,15 @@ const ReportDashboard: React.FC = () => {
               const isPieChart = rawType === "pie" || rawType === "doughnut";
 
               if (isPieChart) {
-                // Special handling for pie charts - separate cards
+                // Handle pie charts in single card like other charts
+                const dataLength = item.data.length;
+                const isLargeDataset = dataLength > 8;
+                
+                // Calculate dynamic height based on data size and legend position
+                const baseHeight = 500;
+                const legendHeight = isLargeDataset ? 0 : Math.ceil(dataLength / 2) * 25; // For bottom legend
+                const totalHeight = baseHeight + legendHeight;
+                
                 return (
                   <React.Fragment key={index}>
                     {showDateHeader && (
@@ -1173,38 +1218,14 @@ const ReportDashboard: React.FC = () => {
                       </div>
                     )}
                     
-                    {/* Chart Type Info Card */}
-                    <div className="w-full bg-blue-50 dark:bg-blue-900 rounded-lg border border-blue-200 dark:border-blue-700 p-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-3">
-                          <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
-                            <span className="text-white text-sm font-bold">📊</span>
-                          </div>
-                          <div>
-                            <h3 className="text-lg font-semibold text-blue-800 dark:text-blue-200">
-                              {rawType.charAt(0).toUpperCase() + rawType.slice(1)} Chart
-                            </h3>
-                            <p className="text-sm text-blue-600 dark:text-blue-300">
-                              Data visualization created on {formatTimestampForDisplay(item.timestamp, "dateOnly")}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="text-sm text-blue-500 dark:text-blue-400">
-                          {item.data.length} data points
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Pie Chart Card */}
-                    <div className="w-full bg-white dark:bg-gray-700 rounded-lg border p-4 flex flex-col relative">
-                      <div className="h-[400px] w-full flex items-center justify-center">
-                        <canvas
-                          id={`chart-canvas-${index}`}
-                          className="max-h-full max-w-full"
-                          style={{ height: "400px", width: "400px" }}
-                        />
-                      </div>
-                      <div className="absolute top-2 right-2 flex gap-2">
+                    <div className="w-full bg-white dark:bg-gray-700 rounded-lg border p-2 flex flex-col relative" 
+                         style={{ height: `${totalHeight}px`, minHeight: '500px' }}>
+                      <canvas
+                        id={`chart-canvas-${index}`}
+                        className="h-full w-full"
+                        style={{ height: `${totalHeight - 20}px` }}
+                      />
+                      <div className="absolute top-2 right-2 flex gap-2 z-10">
                         <Button
                           variant="ghost"
                           onClick={() => handleDownloadChart(index)}
@@ -1224,13 +1245,10 @@ const ReportDashboard: React.FC = () => {
                           <Share2 className="w-5 h-5" />
                         </Button>
                       </div>
-                      <div className="absolute bottom-2 right-2 text-[10px] text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                        {formatTimestampForDisplay(item.timestamp, "timeOnly")}
+                      <div className="absolute bottom-1 right-2 text-[10px] text-gray-500 dark:text-gray-400 whitespace-nowrap z-10">
+                        {formatTimestampForDisplay(item.timestamp, "fullDateTime")}
                       </div>
                     </div>
-
-                    {/* Legend Card */}
-                    <PieChartLegend data={item.data} timestamp={item.timestamp} />
                   </React.Fragment>
                 );
               }
@@ -1444,8 +1462,24 @@ const ReportDashboard: React.FC = () => {
           </div>
         )}
         {listening && (
-          <div className="absolute -top-12 left-0 right-0 text-sm text-blue-600 animate-pulse text-center bg-blue-50 dark:bg-blue-900 py-1 rounded-md">
-            🎤 Listening... Speak now!
+          <div className="absolute -top-16 left-0 right-0 text-sm text-blue-600 text-center">
+            <div className="bg-blue-50 dark:bg-blue-900 py-2 px-4 rounded-lg mx-auto max-w-md border border-blue-200 dark:border-blue-700 shadow-lg">
+              <div className="flex items-center justify-center space-x-2">
+                <div className="flex space-x-1">
+                  <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                  <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                  <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                </div>
+                <span className="text-blue-700 dark:text-blue-300 font-medium">
+                  🎤 I'm listening... Please speak now
+                </span>
+              </div>
+              {transcript && (
+                <div className="mt-2 text-xs text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-800 px-2 py-1 rounded">
+                  "{transcript}"
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

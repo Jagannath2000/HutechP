@@ -672,8 +672,25 @@ const ReportDashboard: React.FC = () => {
           },
         },
         scales: chartType === "pie" || chartType === "doughnut" ? {} : {
-          x: { stacked: false, display: true },
-          y: { stacked: false, beginAtZero: true, display: true },
+          x: { 
+            stacked: false, 
+            display: true,
+            grid: {
+              display: false
+            },
+            ticks: {
+              maxRotation: 45,
+              minRotation: 0
+            }
+          },
+          y: { 
+            stacked: false, 
+            beginAtZero: true, 
+            display: true,
+            grid: {
+              color: 'rgba(0, 0, 0, 0.1)'
+            }
+          },
         },
       },
     };
@@ -755,8 +772,8 @@ const ReportDashboard: React.FC = () => {
             ? {
               barThickness: fixedBarThickness,
               maxBarThickness: fixedBarThickness,
-              barPercentage: 0.7,
-              categoryPercentage: 0.8,
+              barPercentage: 0.8,
+              categoryPercentage: 0.9,
             }
             : {
               fill: false,
@@ -766,8 +783,9 @@ const ReportDashboard: React.FC = () => {
             }),
         }));
         chartConfig.data = { labels, datasets };
-        chartConfig.options.scales!.x!.stacked = true;
-        chartConfig.options.scales!.y!.stacked = true;
+        // Change from stacked to grouped bars - set stacked to false
+        chartConfig.options.scales!.x!.stacked = false;
+        chartConfig.options.scales!.y!.stacked = false;
       } else if (chartType === "bar") {
         const labelKey = data[0]?.name ? "name" : "label";
         const labels = data.map((d) => d[labelKey]);
@@ -785,10 +803,13 @@ const ReportDashboard: React.FC = () => {
           borderWidth: 1,
           barThickness: fixedBarThickness,
           maxBarThickness: fixedBarThickness,
-          barPercentage: 0.7,
-          categoryPercentage: 0.8,
+          barPercentage: 0.8,
+          categoryPercentage: 0.9,
         }));
         chartConfig.data = { labels, datasets };
+        // Ensure bars are grouped, not stacked
+        chartConfig.options.scales!.x!.stacked = false;
+        chartConfig.options.scales!.y!.stacked = false;
       } else if (chartType === "line") {
         const labels = data.map((d) => d.label || d.name || "");
         const values = data.map((d) => d.value || 0);

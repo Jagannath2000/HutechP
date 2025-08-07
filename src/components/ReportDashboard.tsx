@@ -40,13 +40,15 @@ let audioContext: AudioContext | null = null;
 let analyser: AnalyserNode | null = null;
 let microphone: MediaStreamAudioSourceNode | null = null;
 let dataArray: Uint8Array | null = null;
+let currentAudio: HTMLAudioElement | null = null;
 
-// Helper to speak text using ElevenLabs API with voice isolation
+// Helper to speak text using ElevenLabs API with voice isolation and interruption support
 const playElevenLabsTTS = async (text: string) => {
   try {
-    // Stop listening during TTS to prevent feedback
-    if (SpeechRecognition) {
-      SpeechRecognition.stopListening();
+    // Stop any currently playing audio
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio = null;
     }
     
     const response = await fetch(
@@ -66,20 +68,29 @@ const playElevenLabsTTS = async (text: string) => {
     const audioBlob = await response.blob();
     const audioUrl = URL.createObjectURL(audioBlob);
     const audio = new Audio(audioUrl);
+    currentAudio = audio;
     
-    // Wait for TTS to finish before re-enabling speech recognition
+    // Start playing audio
     await audio.play();
     
     return new Promise((resolve) => {
       audio.onended = () => {
+        currentAudio = null;
         // Small delay after TTS ends before re-enabling speech recognition
         setTimeout(() => {
           resolve(undefined);
-        }, 500);
+        }, 300);
+      };
+      
+      // Handle interruption
+      audio.onpause = () => {
+        currentAudio = null;
+        resolve(undefined);
       };
     });
   } catch (err) {
     console.error("ElevenLabs TTS error:", err);
+    currentAudio = null;
     throw err;
   }
 };
@@ -198,7 +209,7 @@ const ReportDashboard: React.FC = () => {
     browserSupportsSpeechRecognition,
   } = useSpeechRecognition();
 
-  const debouncedSpeech = useDebounce<string>(transcript, 1500);
+  const debouncedSpeech = useDebounce<string>(transcript, 800);
 
   const [loading, setLoading] = useState(false);
   const chatMessagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -261,11 +272,11 @@ const ReportDashboard: React.FC = () => {
           SpeechRecognition.startListening({
             continuous: true,
             language: 'en-US',
-            interimResults: false
+            interimResults: true
           });
           setAwaitingMoreQuestion(true);
         }
-      }, 1000);
+      }, 500);
     } catch (error) {
       console.error("Error with voice setup:", error);
       showToast("Error starting voice assistant");
@@ -344,10 +355,16 @@ const ReportDashboard: React.FC = () => {
     });
   };
 
-  // Enhanced speech recognition effect with better voice isolation
+  // Enhanced speech recognition effect with TTS interruption
   useEffect(() => {
-    if (listening && debouncedSpeech.trim() && !isTTSPlaying) {
+    if (listening && debouncedSpeech.trim()) {
       const lower = debouncedSpeech.trim().toLowerCase();
+
+      // Interrupt TTS if user speaks
+      if (currentAudio && !currentAudio.paused) {
+        currentAudio.pause();
+        setIsTTSPlaying(false);
+      }
 
       // Check for stop commands
       if (awaitingMoreQuestion && ["no", "no more", "no thanks", "that's all", "stop", "bye"].some(cmd => lower.includes(cmd))) {
@@ -358,13 +375,24 @@ const ReportDashboard: React.FC = () => {
         return;
       }
 
-      // Process the speech input only if it's meaningful and TTS is not playing
+      // Process the speech input when meaningful
       if (debouncedSpeech.trim().length > 2) {
         handleSend(debouncedSpeech.trim());
         resetTranscript();
       }
     }
-  }, [debouncedSpeech, listening, awaitingMoreQuestion, isTTSPlaying]);
+  }, [debouncedSpeech, listening, awaitingMoreQuestion]);
+
+  // Immediate interruption on any speech input
+  useEffect(() => {
+    if (listening && transcript && transcript.trim().length > 3) {
+      // Interrupt TTS immediately when user starts speaking
+      if (currentAudio && !currentAudio.paused) {
+        currentAudio.pause();
+        setIsTTSPlaying(false);
+      }
+    }
+  }, [transcript, listening]);
 
   // Update input with transcript only when not playing TTS
   useEffect(() => {
@@ -500,10 +528,17 @@ const ReportDashboard: React.FC = () => {
         if (displayData && typeof displayData === "string") {
           try {
             await speakWithIsolation(displayData);
-            if (listening) {
-              setAwaitingMoreQuestion(true);
-              await speakWithIsolation("Do you have any other questions?");
-            }
+            // Auto-restart listening for more responsive interaction
+            setTimeout(() => {
+              if (!listening && browserSupportsSpeechRecognition) {
+                SpeechRecognition.startListening({
+                  continuous: true,
+                  language: 'en-US',
+                  interimResults: true
+                });
+                setAwaitingMoreQuestion(true);
+              }
+            }, 200);
           } catch (error) {
             console.error("TTS Error:", error);
           }
@@ -517,14 +552,17 @@ const ReportDashboard: React.FC = () => {
           data: parsedData,
           timestamp: replyTimestamp,
         });
-        if (listening) {
-          setAwaitingMoreQuestion(true);
-          try {
-            await speakWithIsolation("Do you have any other questions?");
-          } catch (error) {
-            console.error("TTS Error:", error);
+        // Auto-restart listening for chart responses
+        setTimeout(() => {
+          if (!listening && browserSupportsSpeechRecognition) {
+            SpeechRecognition.startListening({
+              continuous: true,
+              language: 'en-US',
+              interimResults: true
+            });
+            setAwaitingMoreQuestion(true);
           }
-        }
+        }, 200);
       }
     } catch (err) {
       setLoading(false);
@@ -769,12 +807,9 @@ const ReportDashboard: React.FC = () => {
                 const data = chart.data;
                 if (data.labels && data.labels.length && data.datasets.length) {
                   const dataset = data.datasets[0];
-                  const total = dataset.data.reduce((a: number, b: number) => a + b, 0);
                   return data.labels.map((label, i) => {
-                    const value = dataset.data[i] as number;
-                    const percent = ((value / total) * 100).toFixed(1);
                     return {
-                      text: `${label}: ${value} (${percent}%)`,
+                      text: `${label}`,
                       fillStyle: (dataset.backgroundColor as string[])[i],
                       strokeStyle: (dataset.borderColor as string[])[i],
                       lineWidth: dataset.borderWidth as number,
